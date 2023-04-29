@@ -13,7 +13,6 @@ from pyVim import connect
 import json
 import os
 import re
-import requests
 import random
 from ssl import _create_unverified_context, get_server_certificate
 import sys
@@ -28,6 +27,9 @@ from kvirt.providers.vsphere.helpers import find, collectproperties, findvm, cre
 from kvirt.providers.vsphere.helpers import createscsispec, creatediskspec, createdvsnicspec, createclonespec
 from kvirt.providers.vsphere.helpers import createnicspec, createisospec, deletedirectory, dssize, keep_lease_alive
 from kvirt.providers.vsphere.helpers import create_filter_spec, get_all_obj, convert_properties, findvm2, findvmdc
+import ssl
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError
 from uuid import UUID
 
 
@@ -976,18 +978,22 @@ class Ksphere:
         cookie_value = client_cookie.split("=", 1)[1].split(";", 1)[0]
         cookie_path = client_cookie.split("=", 1)[1].split(";", 1)[1].split(";", 1)[0].lstrip()
         cookie_text = " " + cookie_value + "; $" + cookie_path
-        cookie = {cookie_name: cookie_text}
-        headers = {'Content-Type': 'application/octet-stream'}
+        cookie = f"{cookie_name}={cookie_text}"
+        headers = {'Content-Type': 'application/octet-stream', 'Cookie': cookie}
         with open(origin, "rb") as f:
-            if hasattr(requests.packages.urllib3, 'disable_warnings'):
-                requests.packages.urllib3.disable_warnings()
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            try:
+                request = Request(url, f, headers=headers, method='UPDATE')
+                urlopen(request, context=context).read()
+            except:
+                url = url.replace('/folder', '')
+                request = Request(url, f, headers=headers, method='UPDATE')
                 try:
-                    r = requests.put(url, data=f, headers=headers, cookies=cookie, verify=False)
-                except:
-                    url = url.replace('/folder', '')
-                    r = requests.put(url, data=f, headers=headers, cookies=cookie, verify=False)
-                if r.status_code not in [200, 201]:
-                    error(f"Got status {r.status_code} with reason: {r.reason}")
+                    urlopen(request, context=context).read()
+                except HTTPError as e:
+                    error(f"Got status {e}")
 
     def get_pool_path(self, pool):
         return pool
